@@ -10,7 +10,6 @@ import {
     elizaLogger as logger,
 } from '@elizaos/core';
 import SandboxService from 'src/sandbox-service';
-import { CodeResponse } from 'src/types';
 import { parseCodeResposnse } from 'src/utils';
 
 const executeCodeAction: Action = {
@@ -20,7 +19,7 @@ const executeCodeAction: Action = {
 
     validate: async (runtime: IAgentRuntime, message: Memory, _state: State): Promise<boolean> => {
         // Validate that the message contains Python code
-        const code = message.content?.code || message.content?.text;
+        const code = message.content?.text;
         return !!code && typeof code === 'string';
     },
 
@@ -36,7 +35,7 @@ const executeCodeAction: Action = {
             logger.debug(`Message: ${JSON.stringify(message)}`);
 
             // Extract code and validate
-            const code = extractCode(message);
+            const code = parseCodeBlock(message.content?.text);
             if (!code) {
                 return handleError('No code provided', message, callback);
             }
@@ -108,11 +107,26 @@ const executeCodeAction: Action = {
     ],
 };
 
-// Helper functions to improve readability and maintainability
+function parseCodeBlock(text: string): string {
+    if (!text) return '';
 
-function extractCode(message: Memory): string | null {
-    return message.content?.code || message.content?.text || null;
+    // Look for code blocks delimited by triple backticks
+    const codeBlockRegex = /```(?:([a-zA-Z0-9]+)[\r\n]+)?([\s\S]+?)```/;
+    const match = text.match(codeBlockRegex);
+
+    logger.info(`MATCH: ${JSON.stringify(match)}`);
+    console.log(`MATCH: ${JSON.stringify(match)}`);
+
+    if (match) {
+        // match[1] would be the language (optional)
+        // match[2] is the code content
+        return match[2].trim();
+    }
+
+    return text;
 }
+
+// Helper functions to improve readability and maintainability
 
 function extractSourceId(message: Memory): string {
     return typeof message.content?.source === 'object' && message.content?.source
