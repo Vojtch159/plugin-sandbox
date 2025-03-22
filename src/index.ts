@@ -14,74 +14,162 @@ import {
   logger,
 } from '@elizaos/core';
 import { z } from 'zod';
+import { Sandbox } from '@e2b/code-interpreter';
 
 /**
- * Defines the configuration schema for a plugin, including the validation rules for the plugin name.
- *
- * @type {import('zod').ZodObject<{ EXAMPLE_PLUGIN_VARIABLE: import('zod').ZodString }>}
+ * Defines the configuration schema for the E2B plugin.
  */
 const configSchema = z.object({
-  EXAMPLE_PLUGIN_VARIABLE: z
+  E2B_API_KEY: z
     .string()
-    .min(1, 'Example plugin variable is not provided')
-    .optional()
-    .transform((val) => {
-      if (!val) {
-        logger.warn('Example plugin variable is not provided (this is expected)');
-      }
-      return val;
-    }),
+    .min(1, 'E2B API key is required')
+    .default(process.env.E2B_API_KEY || ''),
 });
 
 /**
- * Example HelloWorld action
- * This demonstrates the simplest possible action structure
+ * Service to manage the E2B sandbox lifecycle
  */
-/**
- * Action representing a hello world message.
- * @typedef {Object} Action
- * @property {string} name - The name of the action.
- * @property {string[]} similes - An array of related actions.
- * @property {string} description - A brief description of the action.
- * @property {Function} validate - Asynchronous function to validate the action.
- * @property {Function} handler - Asynchronous function to handle the action and generate a response.
- * @property {Object[]} examples - An array of example inputs and expected outputs for the action.
- */
-const helloWorldAction: Action = {
-  name: 'HELLO_WORLD',
-  similes: ['GREET', 'SAY_HELLO'],
-  description: 'Responds with a simple hello world message',
+export class SandboxService extends Service {
+  static serviceType = 'e2b-sandbox';
+  capabilityDescription = 'This service provides a secure sandboxed environment for executing Python code.';
+  sandboxes: Map<string, Sandbox> = new Map();
 
-  validate: async (_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<boolean> => {
-    // Always valid
-    return true;
+  constructor(protected runtime: IAgentRuntime) {
+    super(runtime);
+  }
+
+  static async start(runtime: IAgentRuntime) {
+    logger.info(`*** Starting E2B Sandbox service: ${new Date().toISOString()} ***`);
+    const service = new SandboxService(runtime);
+    return service;
+  }
+
+  static async stop(runtime: IAgentRuntime) {
+    logger.info('*** Stopping E2B Sandbox service ***');
+    const service = runtime.getService(SandboxService.serviceType);
+    if (!service) {
+      throw new Error('E2B Sandbox service not found');
+    }
+    await service.stop();
+  }
+
+  async stop() {
+    logger.info('*** Closing all E2B sandboxes ***');
+    // Close all active sandboxes
+    const closingPromises = [];
+    for (const [id, sandbox] of this.sandboxes.entries()) {
+      logger.info(`Closing sandbox: ${id}`);
+      // Use terminate() instead of close() for E2B API
+      closingPromises.push(sandbox.kill());
+      this.sandboxes.delete(id);
+    }
+    await Promise.all(closingPromises);
+  }
+
+  async getSandbox(userId: string): Promise<Sandbox> {
+    // Check if we already have a sandbox for this user
+    if (this.sandboxes.has(userId)) {
+      return this.sandboxes.get(userId)!;
+    }
+
+    // Create a new sandbox
+    logger.info(`Creating new E2B sandbox for user: ${userId}`);
+    try {
+      const sandbox = await Sandbox.create();
+      this.sandboxes.set(userId, sandbox);
+      return sandbox;
+    } catch (error) {
+      logger.error(`Error creating E2B sandbox: ${error}`);
+      throw error;
+    }
+  }
+
+  async closeSandbox(userId: string): Promise<void> {
+    if (this.sandboxes.has(userId)) {
+      const sandbox = this.sandboxes.get(userId)!;
+      // Use terminate() instead of close() for E2B API
+      await sandbox.kill();
+      this.sandboxes.delete(userId);
+      logger.info(`Closed sandbox for user: ${userId}`);
+    }
+  }
+}
+
+/**
+ * Action to execute Python code in the E2B sandbox
+ */
+const executeCodeAction: Action = {
+  name: 'EXECUTE_PYTHON_CODE',
+  similes: ['RUN_PYTHON', 'EXECUTE_CODE', 'RUN_CODE'],
+  description: 'Executes Python code in a secure sandboxed environment',
+
+  validate: async (runtime: IAgentRuntime, message: Memory, _state: State): Promise<boolean> => {
+    // Validate that the message contains Python code
+    const code = message.content?.code || message.content?.text;
+    return !!code && typeof code === 'string';
   },
 
   handler: async (
-    _runtime: IAgentRuntime,
+    runtime: IAgentRuntime,
     message: Memory,
-    _state: State,
+    state: State,
     _options: any,
     callback: HandlerCallback,
     _responses: Memory[]
   ) => {
     try {
-      logger.info('Handling HELLO_WORLD action');
+      logger.info('Handling EXECUTE_PYTHON_CODE action');
+      
+      // Get the code to execute
+      const code = message.content?.code || message.content?.text;
+      if (!code) {
+        throw new Error('No code provided');
+      }
 
-      // Simple response content
+      // Extract a user identifier from the source
+      // Safely handle the source which might be a complex object or a string
+      const sourceId = typeof message.content?.source === 'object' && message.content?.source
+        ? message.content.source?.id || 'default-user' 
+        : 'default-user';
+      
+      // Get the sandbox service
+      const sandboxService = runtime.getService('e2b-sandbox') as SandboxService;
+      if (!sandboxService) {
+        throw new Error('E2B Sandbox service not found');
+      }
+
+      // Get or create a sandbox for this user
+      const sandbox = await sandboxService.getSandbox(sourceId);
+      
+      // Execute the code
+      logger.info(`Executing Python code for user ${sourceId}`);
+      const execution = await sandbox.runCode(code as string);
+      
+      // Prepare the response content
       const responseContent: Content = {
-        text: 'hello world!',
-        actions: ['HELLO_WORLD'],
+        text: execution.text || '',
+        stdout: execution.logs?.stdout?.join('\n') || '',
+        stderr: execution.logs?.stderr?.join('\n') || '',
+        actions: ['EXECUTE_PYTHON_CODE'],
         source: message.content.source,
       };
 
-      // Call back with the hello world message
+      // Call back with the execution result
       await callback(responseContent);
 
       return responseContent;
     } catch (error) {
-      logger.error('Error in HELLO_WORLD action:', error);
-      throw error;
+      logger.error('Error in EXECUTE_PYTHON_CODE action:', error);
+      
+      // Create an error response
+      const errorContent: Content = {
+        text: `Error executing Python code: ${error}`,
+        actions: ['EXECUTE_PYTHON_CODE'],
+        source: message.content.source,
+      };
+      
+      await callback(errorContent);
+      return errorContent;
     }
   },
 
@@ -90,14 +178,15 @@ const helloWorldAction: Action = {
       {
         name: '{{name1}}',
         content: {
-          text: 'Can you say hello?',
+          text: 'import numpy as np\nprint(np.random.rand(5))',
         },
       },
       {
         name: '{{name2}}',
         content: {
-          text: 'hello world!',
-          actions: ['HELLO_WORLD'],
+          text: '[0.42, 0.71, 0.29, 0.35, 0.63]',
+          stdout: '[0.42, 0.71, 0.29, 0.35, 0.63]',
+          actions: ['EXECUTE_PYTHON_CODE'],
         },
       },
     ],
@@ -105,63 +194,97 @@ const helloWorldAction: Action = {
 };
 
 /**
- * Example Hello World Provider
- * This demonstrates the simplest possible provider implementation
+ * Action to close a specific sandbox
  */
-const helloWorldProvider: Provider = {
-  name: 'HELLO_WORLD_PROVIDER',
-  description: 'A simple example provider',
+const closeSandboxAction: Action = {
+  name: 'CLOSE_SANDBOX',
+  similes: ['TERMINATE_SANDBOX', 'STOP_SANDBOX'],
+  description: 'Closes the sandbox for a specific user',
 
-  get: async (
-    _runtime: IAgentRuntime,
-    _message: Memory,
-    _state: State
-  ): Promise<ProviderResult> => {
-    return {
-      text: 'I am a provider',
-      values: {},
-      data: {},
-    };
+  validate: async (_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<boolean> => {
+    // Always valid
+    return true;
   },
+
+  handler: async (
+    runtime: IAgentRuntime,
+    message: Memory,
+    _state: State,
+    _options: any,
+    callback: HandlerCallback,
+    _responses: Memory[]
+  ) => {
+    try {
+      logger.info('Handling CLOSE_SANDBOX action');
+      
+      // Extract a user identifier from the source
+      // Safely handle the source which might be a complex object or a string
+      const sourceId = typeof message.content?.source === 'object' && message.content?.source 
+        ? message.content.source.id || 'default-user' 
+        : 'default-user';
+      
+      // Get the sandbox service
+      const sandboxService = runtime.getService('e2b-sandbox') as SandboxService;
+      if (!sandboxService) {
+        throw new Error('E2B Sandbox service not found');
+      }
+
+      // Close the sandbox for this user
+      await sandboxService.closeSandbox(sourceId);
+      
+      // Prepare the response content
+      const responseContent: Content = {
+        text: `Sandbox closed for user ${sourceId}`,
+        actions: ['CLOSE_SANDBOX'],
+        source: message.content.source,
+      };
+
+      // Call back with the result
+      await callback(responseContent);
+
+      return responseContent;
+    } catch (error) {
+      logger.error('Error in CLOSE_SANDBOX action:', error);
+      
+      // Create an error response
+      const errorContent: Content = {
+        text: `Error closing sandbox: ${error}`,
+        actions: ['CLOSE_SANDBOX'],
+        source: message.content.source,
+      };
+      
+      await callback(errorContent);
+      return errorContent;
+    }
+  },
+
+  examples: [
+    [
+      {
+        name: '{{name1}}',
+        content: {
+          text: 'Close my sandbox',
+        },
+      },
+      {
+        name: '{{name2}}',
+        content: {
+          text: 'Sandbox closed for user default-user',
+          actions: ['CLOSE_SANDBOX'],
+        },
+      },
+    ],
+  ],
 };
 
-export class StarterService extends Service {
-  static serviceType = 'starter';
-  capabilityDescription =
-    'This is a starter service which is attached to the agent through the starter plugin.';
-  constructor(protected runtime: IAgentRuntime) {
-    super(runtime);
-  }
-
-  static async start(runtime: IAgentRuntime) {
-    logger.info(`*** Starting starter service - MODIFIED: ${new Date().toISOString()} ***`);
-    const service = new StarterService(runtime);
-    return service;
-  }
-
-  static async stop(runtime: IAgentRuntime) {
-    logger.info('*** TESTING DEV MODE - STOP MESSAGE CHANGED! ***');
-    // get the service from the runtime
-    const service = runtime.getService(StarterService.serviceType);
-    if (!service) {
-      throw new Error('Starter service not found');
-    }
-    service.stop();
-  }
-
-  async stop() {
-    logger.info('*** THIRD CHANGE - TESTING FILE WATCHING! ***');
-  }
-}
-
-export const starterPlugin: Plugin = {
-  name: 'plugin-starter',
-  description: 'Plugin starter for elizaOS',
+export const e2bSandboxPlugin: Plugin = {
+  name: 'plugin-e2b-sandbox',
+  description: 'Plugin for running Python code in a secure E2B sandbox environment',
   config: {
-    EXAMPLE_PLUGIN_VARIABLE: process.env.EXAMPLE_PLUGIN_VARIABLE,
+    E2B_API_KEY: process.env.E2B_API_KEY,
   },
   async init(config: Record<string, string>) {
-    logger.info('*** TESTING DEV MODE - PLUGIN MODIFIED AND RELOADED! ***');
+    logger.info('*** Initializing E2B Sandbox plugin ***');
     try {
       const validatedConfig = await configSchema.parseAsync(config);
 
@@ -178,109 +301,48 @@ export const starterPlugin: Plugin = {
       throw error;
     }
   },
-  models: {
-    [ModelType.TEXT_SMALL]: async (
-      _runtime,
-      { prompt, stopSequences = [] }: GenerateTextParams
-    ) => {
-      return 'Never gonna give you up, never gonna let you down, never gonna run around and desert you...';
-    },
-    [ModelType.TEXT_LARGE]: async (
-      _runtime,
-      {
-        prompt,
-        stopSequences = [],
-        maxTokens = 8192,
-        temperature = 0.7,
-        frequencyPenalty = 0.7,
-        presencePenalty = 0.7,
-      }: GenerateTextParams
-    ) => {
-      return 'Never gonna make you cry, never gonna say goodbye, never gonna tell a lie and hurt you...';
-    },
-  },
+  services: [SandboxService],
+  actions: [executeCodeAction, closeSandboxAction],
   tests: [
     {
-      name: 'plugin_starter_test_suite',
+      name: 'e2b_sandbox_test_suite',
       tests: [
         {
-          name: 'example_test',
+          name: 'should_have_execute_code_action',
           fn: async (runtime) => {
-            logger.debug('example_test run by ', runtime.character.name);
-            // Add a proper assertion that will pass
-            if (runtime.character.name !== 'Eliza') {
-              throw new Error(
-                `Expected character name to be "Eliza" but got "${runtime.character.name}"`
-              );
+            // Check if the execute code action is registered
+            const actionExists = e2bSandboxPlugin.actions.some((a) => a.name === 'EXECUTE_PYTHON_CODE');
+            if (!actionExists) {
+              throw new Error('Execute Python code action not found in plugin');
             }
-            // Verify the plugin is loaded properly
-            const service = runtime.getService('starter');
-            if (!service) {
-              throw new Error('Starter service not found');
-            }
-            // Don't return anything to match the void return type
           },
         },
         {
-          name: 'should_have_hello_world_action',
+          name: 'should_have_sandbox_service',
           fn: async (runtime) => {
-            // Check if the hello world action is registered
-            // Look for the action in our plugin's actions
-            // The actual action name in this plugin is "helloWorld", not "hello"
-            const actionExists = starterPlugin.actions.some((a) => a.name === 'HELLO_WORLD');
-            if (!actionExists) {
-              throw new Error('Hello world action not found in plugin');
+            // Start the plugin services
+            await Promise.all(e2bSandboxPlugin.services.map(service => service.start(runtime)));
+            
+            // Check if the sandbox service is registered
+            const service = runtime.getService('e2b-sandbox');
+            if (!service) {
+              throw new Error('E2B Sandbox service not found');
             }
+            
+            // Clean up
+            await Promise.all(e2bSandboxPlugin.services.map(service => service.stop(runtime)));
           },
         },
       ],
     },
   ],
-  routes: [
-    {
-      path: '/helloworld',
-      type: 'GET',
-      handler: async (_req: any, res: any) => {
-        // send a response
-        res.json({
-          message: 'Hello World!',
-        });
-      },
-    },
-  ],
   events: {
-    MESSAGE_RECEIVED: [
-      async (params) => {
-        logger.debug('MESSAGE_RECEIVED event received');
-        // print the keys
-        logger.debug(Object.keys(params));
-      },
-    ],
-    VOICE_MESSAGE_RECEIVED: [
-      async (params) => {
-        logger.debug('VOICE_MESSAGE_RECEIVED event received');
-        // print the keys
-        logger.debug(Object.keys(params));
-      },
-    ],
-    WORLD_CONNECTED: [
-      async (params) => {
-        logger.debug('WORLD_CONNECTED event received');
-        // print the keys
-        logger.debug(Object.keys(params));
-      },
-    ],
     WORLD_JOINED: [
       async (params) => {
-        logger.debug('WORLD_JOINED event received');
-        // print the keys
-        logger.debug(Object.keys(params));
+        logger.debug('WORLD_JOINED event received, ready to execute Python code');
       },
     ],
   },
-  services: [StarterService],
-  actions: [helloWorldAction],
-  providers: [helloWorldProvider],
 };
 
-export default starterPlugin;
+export default e2bSandboxPlugin;
