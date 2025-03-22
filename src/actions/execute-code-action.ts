@@ -1,3 +1,4 @@
+import { ExecutionError } from '@e2b/code-interpreter';
 import {
     type Action,
     type Content,
@@ -9,6 +10,7 @@ import {
     elizaLogger as logger,
 } from '@elizaos/core';
 import SandboxService from 'src/sandbox-service';
+import { CodeResponse } from 'src/types';
 import { parseCodeResposnse } from 'src/utils';
 
 const executeCodeAction: Action = {
@@ -31,92 +33,58 @@ const executeCodeAction: Action = {
     ) => {
         try {
             logger.info('Handling EXECUTE_PYTHON_CODE action');
+            logger.debug(`Message: ${JSON.stringify(message)}`);
 
-            logger.info(`Message: ${JSON.stringify(message)}`);
-
-            // Get the code to execute
-            const code = message.content?.code || message.content?.text;
+            // Extract code and validate
+            const code = extractCode(message);
             if (!code) {
-                throw new Error('No code provided');
+                return handleError('No code provided', message, callback);
             }
 
-            // Extract a user identifier from the source
-            // Safely handle the source which might be a complex object or a string
-            const sourceId = typeof message.content?.source === 'object' && message.content?.source
-                ? (message.content.source as { id?: string }).id || 'default-user'
-                : 'default-user';
+            // Extract user identifier
+            const sourceId = extractSourceId(message);
 
             // Get the sandbox service
             const sandboxService = runtime.getService('e2b-sandbox' as ServiceType) as SandboxService;
             if (!sandboxService) {
-                throw new Error('E2B Sandbox service not found');
+                return handleError('E2B Sandbox service not found', message, callback);
             }
 
             // Get or create a sandbox for this user
-            // Get or create a sandbox for this user
-            let sandbox;
-            try {
-                sandbox = await SandboxService.getSandbox(sourceId);
-            } catch (error) {
-                logger.error(`Error getting sandbox for user ${sourceId}:`, error);
-                throw new Error(`Failed to initialize sandbox: ${error.message}`);
+            const sandbox = await getSandboxForUser(sourceId);
+            if (!sandbox) {
+                return handleError('Failed to initialize sandbox', message, callback);
             }
 
             // Execute the code
             logger.info(`Executing Python code for user ${sourceId}`);
-            logger.info(`Code: ${code}`);
-            const execution = await sandbox.runCode(code as string);
-            logger.info(`Execution result: ${JSON.stringify(execution)}`);
-            const { stdout, stderr, results } = parseCodeResposnse(execution);
+            logger.debug(`Code: ${code}`);
 
-            let responseContent: Content | undefined;
+            const execution = await sandbox.runCode(code, {
+                language: 'python',
+            });
+            logger.info(`Execution result: ${execution}`);
 
-            if (stderr) {
-                logger.error(`Error executing Python code: ${stderr}`);
-                responseContent = {
-                    text: stderr,
-                    actions: ['EXECUTE_PYTHON_CODE'],
-                    source: message.content.source,
-                };
-            } else {
-                let text = "Successfully executed Python code: \n";
+            const { stdout, stderr, error } = parseCodeResposnse(execution);
 
-                text += code;
-                text += "\n\n";
-
-                text += "Output: \n";
-
-                for (const result of stdout) {
-                    text += `${result}`;
-                }
-
-                // Prepare the response content
-                responseContent = {
-                    text: text || '',
-                    stdout: execution.logs?.stdout?.join('\n') || '',
-                    stderr: execution.logs?.stderr?.join('\n') || '',
-                    actions: ['EXECUTE_PYTHON_CODE'],
-                    source: message.content.source,
-                };
+            if (error) {
+                return handleException(error, message, callback);
             }
 
+            // Process execution results
+            const responseContent = processExecutionResults(
+                code,
+                stdout,
+                stderr,
+                execution,
+                message.content.source
+            );
 
             // Call back with the execution result
             await callback(responseContent);
-
             return responseContent;
         } catch (error) {
-            logger.error('Error in EXECUTE_PYTHON_CODE action:', error);
-
-            // Create an error response
-            const errorContent: Content = {
-                text: `Error executing Python code: ${error}`,
-                actions: ['EXECUTE_PYTHON_CODE'],
-                source: message.content.source,
-            };
-
-            await callback(errorContent);
-            return errorContent;
+            return handleError(`Error in EXECUTE_PYTHON_CODE action: ${error}`, message, callback);
         }
     },
 
@@ -139,5 +107,95 @@ const executeCodeAction: Action = {
         ],
     ],
 };
+
+// Helper functions to improve readability and maintainability
+
+function extractCode(message: Memory): string | null {
+    return message.content?.code || message.content?.text || null;
+}
+
+function extractSourceId(message: Memory): string {
+    return typeof message.content?.source === 'object' && message.content?.source
+        ? (message.content.source as { id?: string }).id || 'default-user'
+        : 'default-user';
+}
+
+async function getSandboxForUser(sourceId: string) {
+    try {
+        return await SandboxService.getSandbox(sourceId);
+    } catch (error) {
+        logger.error(`Error getting sandbox for user ${sourceId}:`, error);
+        return null;
+    }
+}
+
+function processExecutionResults(
+    code: string,
+    stdout: string,
+    stderr: string,
+    execution: any,
+    source: any
+): Content {
+    if (stderr) {
+        logger.error(`Error executing Python code: ${stderr}`);
+        return {
+            text: stderr,
+            actions: ['EXECUTE_PYTHON_CODE'],
+            source: source,
+        };
+    }
+
+    // Format successful execution response
+    let text = "Successfully executed Python code: \n";
+    text += code;
+    text += "\n\n";
+    text += "Output: \n";
+
+    for (const result of stdout) {
+        text += `${result}`;
+    }
+
+    return {
+        text: text,
+        stdout: execution.logs?.stdout?.join('\n') || '',
+        stderr: execution.logs?.stderr?.join('\n') || '',
+        actions: ['EXECUTE_PYTHON_CODE'],
+        source: source,
+    };
+}
+
+async function handleException(
+    error: ExecutionError,
+    message: Memory,
+    callback: HandlerCallback
+) {
+    logger.error(error);
+
+    const errorContent: Content = {
+        text: `Error executing Python code: \n${error.value}\n\n${error.traceback}`,
+        actions: ['EXECUTE_PYTHON_CODE'],
+        source: message.content?.source,
+    };
+
+    await callback(errorContent);
+    return errorContent;
+}
+
+async function handleError(
+    errorMessage: string,
+    message: Memory,
+    callback: HandlerCallback
+): Promise<Content> {
+    logger.error(errorMessage);
+
+    const errorContent: Content = {
+        text: `Error executing Python code: \n${errorMessage}`,
+        actions: ['EXECUTE_PYTHON_CODE'],
+        source: message.content?.source,
+    };
+
+    await callback(errorContent);
+    return errorContent;
+}
 
 export default executeCodeAction;

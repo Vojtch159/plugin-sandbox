@@ -4,4 +4,9 @@ export type CodeResponse = {
         stdout: string[];
         stderr: string[];
     };
+    error: {
+        name: string;
+        value: string;
+        traceback: string;
+    }
 }

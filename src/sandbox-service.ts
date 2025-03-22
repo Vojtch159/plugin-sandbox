@@ -23,6 +23,14 @@ class SandboxService extends Service {
         }
     }
 
+    async initialize(runtime: IAgentRuntime) {
+        logger.info(`*** Initializing E2B Sandbox service: ${new Date().toISOString()} ***`);
+        const apiKey = runtime.getSetting("E2B_API_KEY") as string;
+        if (!apiKey) {
+            throw new Error("E2B_API_KEY is not set");
+        }
+    }
+
     static async start(runtime: IAgentRuntime): Promise<SandboxService> {
         logger.info(`*** Starting E2B Sandbox service: ${new Date().toISOString()} ***`);
         const service = new SandboxService(runtime);
