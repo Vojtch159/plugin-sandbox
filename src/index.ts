@@ -41,6 +41,26 @@ export class SandboxService extends Service {
   static async start(runtime: IAgentRuntime) {
     logger.info(`*** Starting E2B Sandbox service: ${new Date().toISOString()} ***`);
     const service = new SandboxService(runtime);
+
+    const sandbox = await Sandbox.create({
+      metadata: {
+        userId: 'default-user',
+        createdAt: new Date().toISOString(),
+        purpose: 'python-code-execution',
+        sessionId: `session-${Date.now()}`
+      }
+    })
+
+    const runningSandboxes = await Sandbox.list() 
+    const runningSandbox = runningSandboxes[0]
+
+    console.log('Running sandbox metadata:', runningSandbox.metadata)
+    console.log('Running sandbox id:', runningSandbox.sandboxId)
+    console.log('Running sandbox started at:', runningSandbox.startedAt)
+    console.log('Running sandbox template id:', runningSandbox.templateId)
+    
+
+    logger.info(`E2B Sandbox service started`);
     return service;
   }
 
@@ -59,7 +79,6 @@ export class SandboxService extends Service {
     const closingPromises = [];
     for (const [id, sandbox] of this.sandboxes.entries()) {
       logger.info(`Closing sandbox: ${id}`);
-      // Use terminate() instead of close() for E2B API
       closingPromises.push(sandbox.kill());
       this.sandboxes.delete(id);
     }
@@ -75,7 +94,24 @@ export class SandboxService extends Service {
     // Create a new sandbox
     logger.info(`Creating new E2B sandbox for user: ${userId}`);
     try {
-      const sandbox = await Sandbox.create();
+      const sandbox = await Sandbox.create({
+        metadata: {
+          userId: userId,
+          createdAt: new Date().toISOString(),
+          purpose: 'python-code-execution',
+          sessionId: `session-${Date.now()}`
+        }
+      });
+
+      const runningSandboxes = await Sandbox.list() 
+      const runningSandbox = runningSandboxes[0]
+
+      logger.info(`E2B sandbox created for user: ${userId}`);
+      console.log('Running sandbox metadata:', runningSandbox.metadata)
+      console.log('Running sandbox id:', runningSandbox.sandboxId)
+      console.log('Running sandbox started at:', runningSandbox.startedAt)
+      console.log('Running sandbox template id:', runningSandbox.templateId)
+
       this.sandboxes.set(userId, sandbox);
       return sandbox;
     } catch (error) {
@@ -87,7 +123,6 @@ export class SandboxService extends Service {
   async closeSandbox(userId: string): Promise<void> {
     if (this.sandboxes.has(userId)) {
       const sandbox = this.sandboxes.get(userId)!;
-      // Use terminate() instead of close() for E2B API
       await sandbox.kill();
       this.sandboxes.delete(userId);
       logger.info(`Closed sandbox for user: ${userId}`);
@@ -129,7 +164,7 @@ const executeCodeAction: Action = {
       // Extract a user identifier from the source
       // Safely handle the source which might be a complex object or a string
       const sourceId = typeof message.content?.source === 'object' && message.content?.source
-        ? message.content.source?.id || 'default-user' 
+        ? (message.content.source as any)?.id || 'default-user' 
         : 'default-user';
       
       // Get the sandbox service
@@ -144,6 +179,7 @@ const executeCodeAction: Action = {
       // Execute the code
       logger.info(`Executing Python code for user ${sourceId}`);
       const execution = await sandbox.runCode(code as string);
+      logger.info(`Execution result: ${execution.text}`);
       
       // Prepare the response content
       const responseContent: Content = {
@@ -194,6 +230,140 @@ const executeCodeAction: Action = {
 };
 
 /**
+ * Provider to get all running sandboxes
+ */
+const sandboxesProvider: Provider = {
+  name: 'SANDBOXES',
+  description: 'Provides a list of all running sandboxes',
+  dynamic: true,
+
+  get: async (
+    runtime: IAgentRuntime,
+    message: Memory,
+    state: State
+  ): Promise<ProviderResult> => {
+    try {
+      logger.info('Handling SANDBOXES provider request');
+      
+      // Get all running sandboxes
+      const runningSandboxes = await Sandbox.list();
+      
+      // Format the sandbox information
+      const sandboxInfo = runningSandboxes.map(sandbox => ({
+        sandboxId: sandbox.sandboxId,
+        startedAt: sandbox.startedAt,
+        templateId: sandbox.templateId,
+        metadata: sandbox.metadata
+      }));
+      
+      return {
+        text: `Found ${runningSandboxes.length} running sandboxes`,
+        values: {
+          count: runningSandboxes.length,
+          sandboxes: sandboxInfo
+        }
+      };
+    } catch (error) {
+      logger.error('Error in SANDBOXES provider:', error);
+      return {
+        text: `Failed to retrieve sandboxes: ${error}`
+      };
+    }
+  }
+};
+
+/**
+ * Action to list all running sandboxes
+ */
+const listSandboxesAction: Action = {
+  name: 'LIST_SANDBOXES',
+  similes: ['SHOW_SANDBOXES', 'GET_SANDBOXES'],
+  description: 'Lists all running sandboxes',
+
+  validate: async (_runtime: IAgentRuntime, _message: Memory, _state: State): Promise<boolean> => {
+    // Always valid
+    return true;
+  },
+
+  handler: async (
+    runtime: IAgentRuntime,
+    message: Memory,
+    _state: State,
+    _options: any,
+    callback: HandlerCallback,
+    _responses: Memory[]
+  ) => {
+    try {
+      logger.info('Handling LIST_SANDBOXES action');
+      
+      // Use the sandboxes provider to get the data
+      const result = await runtime.composeState(message, null, ['SANDBOXES']);
+      
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      
+      // Prepare the response content
+      const responseContent: Content = {
+        text: `Found ${result.data.count} running sandboxes`,
+        sandboxes: result.data.sandboxes,
+        actions: ['LIST_SANDBOXES'],
+        source: message.content.source,
+      };
+
+      // Call back with the result
+      await callback(responseContent);
+
+      return responseContent;
+    } catch (error) {
+      logger.error('Error in LIST_SANDBOXES action:', error);
+      
+      // Create an error response
+      const errorContent: Content = {
+        text: `Error listing sandboxes: ${error}`,
+        actions: ['LIST_SANDBOXES'],
+        source: message.content.source,
+      };
+      
+      await callback(errorContent);
+      return errorContent;
+    }
+  },
+
+  examples: [
+    [
+      {
+        name: '{{name1}}',
+        content: {
+          text: 'Show me all running sandboxes',
+        },
+      },
+      {
+        name: '{{name2}}',
+        content: {
+          text: 'Found 2 running sandboxes',
+          sandboxes: [
+            {
+              sandboxId: 'sandbox-123',
+              startedAt: '2023-06-01T12:00:00Z',
+              templateId: 'template-abc',
+              metadata: { userId: 'user-1', purpose: 'python-code-execution' }
+            },
+            {
+              sandboxId: 'sandbox-456',
+              startedAt: '2023-06-01T13:00:00Z',
+              templateId: 'template-abc',
+              metadata: { userId: 'user-2', purpose: 'python-code-execution' }
+            }
+          ],
+          actions: ['LIST_SANDBOXES'],
+        },
+      },
+    ],
+  ],
+};
+
+/**
  * Action to close a specific sandbox
  */
 const closeSandboxAction: Action = {
@@ -219,8 +389,8 @@ const closeSandboxAction: Action = {
       
       // Extract a user identifier from the source
       // Safely handle the source which might be a complex object or a string
-      const sourceId = typeof message.content?.source === 'object' && message.content?.source 
-        ? message.content.source.id || 'default-user' 
+      const sourceId = typeof message.content?.source === 'object' && message.content?.source
+        ? (message.content.source as any)?.id || 'default-user' 
         : 'default-user';
       
       // Get the sandbox service
@@ -290,6 +460,7 @@ export const e2bSandboxPlugin: Plugin = {
 
       // Set all environment variables at once
       for (const [key, value] of Object.entries(validatedConfig)) {
+        console.log(`Setting environment variable: ${key} = ${value}`);
         if (value) process.env[key] = value;
       }
     } catch (error) {
@@ -302,7 +473,8 @@ export const e2bSandboxPlugin: Plugin = {
     }
   },
   services: [SandboxService],
-  actions: [executeCodeAction, closeSandboxAction],
+  actions: [executeCodeAction, listSandboxesAction, closeSandboxAction],
+  providers: [sandboxesProvider],
   tests: [
     {
       name: 'e2b_sandbox_test_suite',

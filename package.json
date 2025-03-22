@@ -1,5 +1,5 @@
 {
-  "name": "@elizaos/plugin-plugin-sandbox",
+  "name": "@elizaos/plugin-sandbox",
   "description": "Plugin starter for elizaOS",
   "version": "1.0.0-beta.6",
   "private": true,
@@ -29,6 +29,7 @@
     "@elizaos/core": "1.0.0-beta.7",
     "@elizaos/plugin-local-ai": "1.0.0-beta.7",
     "@elizaos/plugin-sql": "1.0.0-beta.7",
+    "dotenv": "^16.3.1",
     "zod": "3.24.2"
   },
   "devDependencies": {
@@ -52,5 +53,16 @@
   "resolutions": {
     "zod": "3.24.2"
   },
-  "gitHead": "b165ad83e5f7a21bc1edbd83374ca087e3cd6b33"
+  "gitHead": "b165ad83e5f7a21bc1edbd83374ca087e3cd6b33",
+  "agentConfig": {
+        "pluginType": "elizaos:client:1.0.0",
+        "pluginParameters": {
+            "E2B_API_KEY": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The plugin requires the following environment variable: E2B_API_KEY=your_e2b_api_key",
+                "optional": false
+            }
+        }
+    }
 }
