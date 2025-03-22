@@ -26,6 +26,25 @@ const configSchema = z.object({
     .default(process.env.E2B_API_KEY || ''),
 });
 
+type CodeResponse = {
+  results: string[];
+  logs: {
+    stdout: string[];
+    stderr: string[];
+  };
+}
+
+/**
+ *
+ * @param response Execution result: {"results":[],"logs":{"stdout":["101010\n"],"stderr":[]}}
+ */
+export const parseCodeResposnse = (response: CodeResponse) => {
+  const stdout = response.logs.stdout[0];
+  const stderr = response.logs.stderr[0];
+  const results = response.results;
+  return { stdout, stderr, results };
+}
+
 /**
  * Service to manage the E2B sandbox lifecycle
  */
@@ -157,15 +176,39 @@ const executeCodeAction: Action = {
       logger.info(`Code: ${code}`);
       const execution = await sandbox.runCode(code as string);
       logger.info(`Execution result: ${JSON.stringify(execution)}`);
+      const { stdout, stderr, results } = parseCodeResposnse(execution);
 
-      // Prepare the response content
-      const responseContent: Content = {
-        text: execution.text || '',
-        stdout: execution.logs?.stdout?.join('\n') || '',
-        stderr: execution.logs?.stderr?.join('\n') || '',
-        actions: ['EXECUTE_PYTHON_CODE'],
-        source: message.content.source,
-      };
+      let responseContent: Content | undefined;
+
+      if (stderr) {
+        logger.error(`Error executing Python code: ${stderr}`);
+        responseContent = {
+          text: stderr,
+          actions: ['EXECUTE_PYTHON_CODE'],
+          source: message.content.source,
+        };
+      } else {
+        let text = "Successfully executed Python code: \n";
+
+        text += code;
+        text += "\n\n";
+
+        text += "Output: \n";
+
+        for (const result of stdout) {
+          text += `${result}`;
+        }
+
+        // Prepare the response content
+        responseContent = {
+            text: text || '',
+            stdout: execution.logs?.stdout?.join('\n') || '',
+            stderr: execution.logs?.stderr?.join('\n') || '',
+            actions: ['EXECUTE_PYTHON_CODE'],
+            source: message.content.source,
+        };
+      }
+
 
       // Call back with the execution result
       await callback(responseContent);
