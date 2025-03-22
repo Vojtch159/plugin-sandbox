@@ -343,7 +343,8 @@ export const fileWriteAction: Action = {
                 return responseContent;
             } else {
                 logger.info(`Writing file ${request.path} for user ${sourceId}`);
-                await sandbox.files.write(request.path, request.content);
+                const res = await sandbox.files.write(request.path, request.content);
+                logger.info(`Write result: ${res}`);
 
                 const responseContent: Content = {
                     text: `Successfully wrote file: ${request.path}`,

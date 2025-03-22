@@ -51,16 +51,16 @@ class SandboxService extends Service {
     }
 
     async getSandbox(userId: string): Promise<Sandbox> {
-        // Check if sandbox already exists for this user
-        if (this.sandboxes.has(userId)) {
-            return this.sandboxes.get(userId)!;
-        }
-
         // Create a new sandbox
         logger.info(`Creating new E2B sandbox for user: ${userId}`);
         try {
-            const sandbox = await Sandbox.create();
-            this.sandboxes.set(userId, sandbox);
+            const sandbox = await Sandbox.create({
+                metadata: {
+                    userId,
+                },
+            });
+            logger.info(`New sandbox created: ${sandbox.sandboxId}`);
+            this.sandboxes.set(sandbox.sandboxId, sandbox);
             return sandbox;
         } catch (error) {
             logger.error(`Error creating E2B sandbox: ${error}`);
@@ -72,7 +72,24 @@ class SandboxService extends Service {
         // Create a new sandbox
         logger.info(`Creating new E2B sandbox for user: ${userId}`);
         try {
-            const sandbox = await Sandbox.create();
+            const sandboxList = await Sandbox.list({
+                query: {
+                    metadata: {
+                        userId
+                    }
+                },
+            });
+            if (sandboxList.length >= 1) {
+                const sandbox = await Sandbox.connect(sandboxList[0].sandboxId);
+                return sandbox;
+            }
+
+            const sandbox = await Sandbox.create({
+                metadata: {
+                    userId,
+                },
+            });
+            logger.info(`New sandbox created: ${sandbox.sandboxId}`);
             return sandbox;
         } catch (error) {
             logger.error(`Error creating E2B sandbox: ${error}`);
