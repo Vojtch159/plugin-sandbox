@@ -5,6 +5,7 @@ import executeJavaScriptAction from './actions/execute-javascript-action';
 import listSandboxesAction from './actions/list-sandboxes-action';
 import executeBashAction from './actions/execute-bash-action';
 import executeJavaAction from './actions/execute-java-action';
+import executeRlangAction from './actions/execute-rlang-action';
 
 export const e2bSandboxPlugin: Plugin = {
   name: 'plugin-e2b-sandbox',
@@ -18,6 +19,7 @@ export const e2bSandboxPlugin: Plugin = {
     executeJavaScriptAction,
     executeBashAction,
     executeJavaAction,
+    executeRlangAction,
     listSandboxesAction,
 ],
 };
