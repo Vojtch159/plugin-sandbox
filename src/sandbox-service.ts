@@ -15,14 +15,6 @@ class SandboxService extends Service {
         super();
     }
 
-    async initialize() {
-        logger.info(`*** Initializing E2B Sandbox service: ${new Date().toISOString()} ***`);
-        const apiKey = this.runtime.getSetting("E2B_API_KEY") as string;
-        if (!apiKey) {
-            throw new Error("E2B_API_KEY is not set");
-        }
-    }
-
     static async initialize(runtime: IAgentRuntime) {
         logger.info(`*** Initializing E2B Sandbox service: ${new Date().toISOString()} ***`);
         const apiKey = runtime.getSetting("E2B_API_KEY") as string;
@@ -31,22 +23,13 @@ class SandboxService extends Service {
         }
     }
 
-    static async start(runtime: IAgentRuntime) {
+    static async start(runtime: IAgentRuntime): Promise<SandboxService> {
         logger.info(`*** Starting E2B Sandbox service: ${new Date().toISOString()} ***`);
         const service = new SandboxService(runtime);
         return service;
     }
 
-    static async stop(runtime: IAgentRuntime) {
-        logger.info('*** Stopping E2B Sandbox service ***');
-        const service = runtime.getService(SandboxService.serviceType);
-        if (!service) {
-            throw new Error('E2B Sandbox service not found');
-        }
-        await (service as SandboxService).stop();
-    }
-
-    async stop() {
+    async stop(): Promise<void> {
         logger.info('*** Closing all E2B sandboxes ***');
         // Close all active sandboxes
         const closingPromises = [];
@@ -57,6 +40,24 @@ class SandboxService extends Service {
             this.sandboxes.delete(id);
         }
         await Promise.all(closingPromises);
+    }
+
+    async getSandbox(userId: string): Promise<Sandbox> {
+        // Check if sandbox already exists for this user
+        if (this.sandboxes.has(userId)) {
+            return this.sandboxes.get(userId)!;
+        }
+
+        // Create a new sandbox
+        logger.info(`Creating new E2B sandbox for user: ${userId}`);
+        try {
+            const sandbox = await Sandbox.create();
+            this.sandboxes.set(userId, sandbox);
+            return sandbox;
+        } catch (error) {
+            logger.error(`Error creating E2B sandbox: ${error}`);
+            throw error;
+        }
     }
 
     static async getSandbox(userId: string): Promise<Sandbox> {
