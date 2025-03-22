@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
-    "lib": ["ESNext"],
+    "lib": [
+      "ESNext"
+    ],
     "target": "ESNext",
     "module": "Preserve",
     "moduleResolution": "Bundler",
@@ -22,9 +23,17 @@
     "allowArbitraryExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "@elizaos/core": ["../core/src"],
-      "@elizaos/core/*": ["../core/src/*"]
-    }
+      "@elizaos/core": [
+        "../core/src"
+      ],
+      "@elizaos/core/*": [
+        "../core/src/*"
+      ]
+    },
+    "composite": true
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "tests/service.test.ts"
+  ],
 }

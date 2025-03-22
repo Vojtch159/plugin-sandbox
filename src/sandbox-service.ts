@@ -1,17 +1,26 @@
 import {
     type IAgentRuntime,
     Service,
-    logger,
+    type ServiceType,
+    elizaLogger as logger,
 } from '@elizaos/core';
 import { Sandbox } from '@e2b/code-interpreter';
 
 class SandboxService extends Service {
-    static serviceType = 'e2b-sandbox';
+    static serviceType = 'e2b-sandbox' as ServiceType;
     capabilityDescription = 'This service provides a secure sandboxed environment for executing Python code.';
     sandboxes: Map<string, Sandbox> = new Map();
 
     constructor(protected runtime: IAgentRuntime) {
         super();
+    }
+
+    async initialize() {
+        logger.info(`*** Initializing E2B Sandbox service: ${new Date().toISOString()} ***`);
+        const apiKey = this.runtime.getSetting("E2B_API_KEY") as string;
+        if (!apiKey) {
+            throw new Error("E2B_API_KEY is not set");
+        }
     }
 
     static async initialize(runtime: IAgentRuntime) {
@@ -34,7 +43,7 @@ class SandboxService extends Service {
         if (!service) {
             throw new Error('E2B Sandbox service not found');
         }
-        await service.stop();
+        await (service as SandboxService).stop();
     }
 
     async stop() {

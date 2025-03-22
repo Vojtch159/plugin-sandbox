@@ -4,8 +4,9 @@ import {
     type HandlerCallback,
     type IAgentRuntime,
     type Memory,
+    ServiceType,
     type State,
-    logger,
+    elizaLogger as logger,
 } from '@elizaos/core';
 import SandboxService from 'src/sandbox-service';
 
@@ -22,10 +23,9 @@ const closeSandboxAction: Action = {
     handler: async (
         runtime: IAgentRuntime,
         message: Memory,
-        _state: State,
-        _options: any,
+        state: State,
+        options: any,
         callback: HandlerCallback,
-        _responses: Memory[]
     ) => {
         try {
             logger.info('Handling CLOSE_SANDBOX action');
@@ -37,7 +37,7 @@ const closeSandboxAction: Action = {
                 : 'default-user';
 
             // Get the sandbox service
-            const sandboxService = runtime.getService('e2b-sandbox') as SandboxService;
+            const sandboxService = runtime.getService('e2b-sandbox' as ServiceType) as SandboxService;
             if (!sandboxService) {
                 throw new Error('E2B Sandbox service not found');
             }
@@ -74,13 +74,13 @@ const closeSandboxAction: Action = {
     examples: [
         [
             {
-                name: '{{name1}}',
+                user: '{{name1}}',
                 content: {
                     text: 'Close my sandbox',
                 },
             },
             {
-                name: '{{name2}}',
+                user: '{{name2}}',
                 content: {
                     text: 'Sandbox closed for user default-user',
                     actions: ['CLOSE_SANDBOX'],

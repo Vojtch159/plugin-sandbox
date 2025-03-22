@@ -5,7 +5,8 @@ import {
     type IAgentRuntime,
     type Memory,
     type State,
-    logger,
+    ServiceType,
+    elizaLogger as logger,
 } from '@elizaos/core';
 import SandboxService from 'src/sandbox-service';
 import { parseCodeResposnse } from 'src/utils';
@@ -25,9 +26,8 @@ const executeCodeAction: Action = {
         runtime: IAgentRuntime,
         message: Memory,
         state: State,
-        _options: any,
+        options: any,
         callback: HandlerCallback,
-        _responses: Memory[]
     ) => {
         try {
             logger.info('Handling EXECUTE_PYTHON_CODE action');
@@ -47,7 +47,7 @@ const executeCodeAction: Action = {
                 : 'default-user';
 
             // Get the sandbox service
-            const sandboxService = runtime.getService('e2b-sandbox');
+            const sandboxService = runtime.getService('e2b-sandbox' as ServiceType) as SandboxService;
             if (!sandboxService) {
                 throw new Error('E2B Sandbox service not found');
             }
@@ -123,13 +123,13 @@ const executeCodeAction: Action = {
     examples: [
         [
             {
-                name: '{{name1}}',
+                user: '{{name1}}',
                 content: {
                     text: 'import numpy as np\nprint(np.random.rand(5))',
                 },
             },
             {
-                name: '{{name2}}',
+                user: '{{name2}}',
                 content: {
                     text: '[0.42, 0.71, 0.29, 0.35, 0.63]',
                     stdout: '[0.42, 0.71, 0.29, 0.35, 0.63]',
