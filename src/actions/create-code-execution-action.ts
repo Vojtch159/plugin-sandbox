@@ -10,8 +10,7 @@ import {
     elizaLogger as logger,
 } from '@elizaos/core';
 import SandboxService from '../sandbox-service';
-import { CodeResponse } from '../types';
-import { parseCodeResposnse } from '../utils';
+import { extractSourceId, parseCodeResposnse } from '../utils';
 
 // Type for language configuration
 interface LanguageConfig {
@@ -26,12 +25,6 @@ interface LanguageConfig {
 function extractCode(message: Memory): string | null {
     const code = parseCodeBlock(message.content?.text || '');
     return code;
-}
-
-function extractSourceId(message: Memory): string {
-    return typeof message.content?.source === 'object' && message.content?.source
-        ? (message.content.source as { id?: string }).id || 'default-user'
-        : 'default-user';
 }
 
 async function getSandboxForUser(sourceId: string) {
@@ -187,7 +180,15 @@ export function createCodeExecutionAction(config: LanguageConfig): Action {
                 const execution = await sandbox.runCode(code, {
                     language: config.language.toLowerCase(),
                 });
-                logger.info(`Execution result: ${execution}`);
+                logger.info(`Execution result: ${JSON.stringify(execution)}`);
+
+                logger.info(`Execution result type: ${typeof execution}`);
+                logger.info(`Execution result type: ${execution.error}`);
+                logger.info(`Execution result logs: ${execution.logs}`);
+                logger.info(`Execution result results: ${execution.results}`);
+                logger.info(`Execution result error: ${execution.error}`);
+                logger.info(`Execution result stdout: ${execution.logs.stdout}`);
+                logger.info(`Execution result stderr: ${execution.logs.stderr}`);
 
                 const { stdout, stderr, error } = parseCodeResposnse(execution);
 

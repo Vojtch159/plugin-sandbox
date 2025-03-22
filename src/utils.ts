@@ -1,5 +1,6 @@
 import type { CodeResponse } from 'src/types';
 import type { Execution } from '@e2b/code-interpreter';
+import type { Memory } from '@elizaos/core';
 
 export const parseCodeResposnse = (response: Execution | string[] | string | undefined) => {
     if (!response) {
@@ -19,4 +20,10 @@ export const parseCodeResposnse = (response: Execution | string[] | string | und
     const results = response.results;
     const error = response.error;
     return { stdout, stderr, results, error };
+}
+
+export function extractSourceId(message: Memory): string {
+    return typeof message.content?.source === 'object' && message.content?.source
+        ? (message.content.source as { id?: string }).id || 'default-user'
+        : 'default-user';
 }
