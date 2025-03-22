@@ -4,7 +4,7 @@ import {
     type ServiceType,
     elizaLogger as logger,
 } from '@elizaos/core';
-import { Sandbox } from '@e2b/code-interpreter';
+import { Sandbox, SandboxInfo } from '@e2b/code-interpreter';
 
 class SandboxService extends Service {
     static serviceType = 'e2b-sandbox' as ServiceType;
@@ -78,6 +78,16 @@ class SandboxService extends Service {
             await sandbox.kill();
             this.sandboxes.delete(userId);
             logger.info(`Closed sandbox for user: ${userId}`);
+        }
+    }
+
+    static async list(): Promise<SandboxInfo[]> {
+        logger.info(`Listing all E2B sandboxes`);
+        try {
+            return await Sandbox.list();
+        } catch (error) {
+            logger.error(`Error listing E2B sandboxes: ${error}`);
+            throw error;
         }
     }
 }
