@@ -1,7 +1,6 @@
 import type { Plugin } from '@elizaos/core';
-import SandboxService from 'src/sandbox-service';
-import executeCodeAction from 'src/actions/execute-code-action';
-import closeSandboxAction from 'src/actions/close-sandbox-action';
+import SandboxService from './sandbox-service';
+import executeCodeAction from './actions/execute-code-action';
 
 export const e2bSandboxPlugin: Plugin = {
   name: 'plugin-e2b-sandbox',
@@ -10,7 +9,7 @@ export const e2bSandboxPlugin: Plugin = {
     E2B_API_KEY: process.env.E2B_API_KEY,
   },
   services: [SandboxService],
-  actions: [executeCodeAction, closeSandboxAction],
+  actions: [executeCodeAction],
 };
 
 export default e2bSandboxPlugin;
